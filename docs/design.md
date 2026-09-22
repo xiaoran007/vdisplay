@@ -1,6 +1,6 @@
 # vdisplay Research and Implementation Design
 
-Research date: 2026-09-22. Status: agreed project direction; implementation and virtual display experiments have not started.
+Research date: 2026-09-22. Status: P0 implemented and validated on the local Apple Silicon host. See [validation results](validation.md) and the [README](../README.md) for current behavior. Later phases remain proposals.
 
 ## 1. Recommended approach
 
@@ -91,11 +91,11 @@ Suggested modules:
 | `DisplayCore` | Profiles, validation, display enumeration, actual mode inspection, lifecycle state, and errors |
 | `vdisplay` | Argument parsing, output, foreground execution; later agent mode and IPC client |
 
-Use Swift Package Manager with separate Swift and Objective-C targets. Link Foundation/CoreGraphics and add AppKit only if needed. Do not introduce Python, Node, Rust, or a third-party virtual display runtime. System `getopt_long` is sufficient for the initial small interface. If a larger CLI warrants Apple ArgumentParser later, request dependency installation first.
+Use Swift Package Manager with separate Swift and Objective-C targets. The P0 implementation links Foundation/CoreGraphics, uses AppKit for display names, and SystemConfiguration for console-user inspection. It uses a small strict Swift argument parser so parsing can be tested without touching display APIs. Do not introduce Python, Node, Rust, or a third-party virtual display runtime. If a larger CLI warrants Apple ArgumentParser later, request dependency installation first.
 
 For the second phase, use a per-user Unix domain socket: private runtime directory mode 0700, socket mode 0600, and peer UID validation. Accept only versioned, size-limited JSON commands, never arbitrary shell execution. Use one agent per GUI session and serialize display changes. Place the socket under a short path in the system-provided user temporary directory to respect socket path limits. Store configuration in `~/Library/Application Support/vdisplay/`.
 
-Lifecycle states are `creating -> ready -> removing -> stopped`; failures enter `failed` with observed state. Register display notifications before mutations and confirm completion through bounded state readback, rather than fixed sleeps. Release objects allocated by a failed creation attempt as operation cleanup. Report removal timeouts rather than claiming the display disappeared.
+Lifecycle states are `creating -> ready -> removing -> stopped`; failures report observed state. Confirm completion through bounded state readback rather than fixed sleeps. P0 registers display notifications after creation: registering before creation caused missing mode readback on the validation host. Readback covers missed add events. Release objects allocated by a failed creation attempt as operation cleanup. Report removal timeouts rather than claiming the display disappeared.
 
 LaunchAgent installation, startup, shutdown, and removal require explicit commands. Queries must not silently install services. Separate persistent configuration from runtime state and persist only profiles explicitly saved/enabled by the user. After abnormal termination, report state and require an explicit start instead of silently restarting or recreating displays.
 
@@ -103,7 +103,7 @@ Initial exclusions: GUI, previews, encoding, network remote control, physical di
 
 ## 5. Proposed CLI
 
-These commands are not implemented yet.
+The first-phase commands below are implemented. Second-phase commands remain proposals.
 
 First phase:
 
@@ -158,9 +158,9 @@ Retain the existing GPLv3 LICENSE. Include applicable attribution and licenses w
 | P3: Consumer compatibility | Native discovery/capture records for pinned Sunshine/Moonlight versions | Consumer enumerates and selects the display; image, dimensions, and mouse mapping are correct without vdisplay managing consumer processes/configuration |
 | P4: Release | Universal 2, signing/notarization, install/uninstall instructions, compatibility table | Clean user environment can install and run; package includes notices; documentation lists only validated capabilities |
 
-Implement P0 next. Establish reliable display creation, ownership, and removal on the current Mac before building the full background service.
+P0 is complete on the local validation host. Next, expand P1 hardware and mode coverage before building the background service. The initial implementation already accepts scale 1/2 and custom dimensions, but that does not establish the full P1 compatibility matrix.
 
-The following is a **future validation plan, not work already performed**:
+The following is the overall validation plan; [the validation record](validation.md) distinguishes completed checks from pending coverage:
 
 - Architectures/OS: native Intel and Apple Silicon; macOS 13, 14, 15, and 26 as hardware permits. Record the local macOS 27 separately; it does not establish compatibility with older systems.
 - Modes: 1920x1080, 2560x1440, 3840x2160, scales 1/2, non-16:9 and portrait dimensions, invalid arguments, and rejected modes with appropriate exit codes.
@@ -194,4 +194,4 @@ Core source files were inspected at these revisions:
 
 The repository initially contained only README and GPLv3 LICENSE, with a clean working tree. Research added collaboration guidelines, ignore rules, this design, and an updated README. No Python was used, dependencies installed, virtual displays created, or Sunshine/system display settings changed.
 
-Read-only environment inspection: `arm64`, macOS `27.0` (`26A428`), Xcode developer directory `/Applications/Xcode.app/Contents/Developer`. Compiler, SDK, Intel target builds, and display functionality have not been validated.
+Initial read-only environment inspection: `arm64`, macOS `27.0` (`26A428`), Xcode developer directory `/Applications/Xcode.app/Contents/Developer`. That research did not validate builds or display functionality; subsequent implementation results are recorded separately in [validation.md](validation.md).
