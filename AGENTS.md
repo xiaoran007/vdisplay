@@ -6,7 +6,7 @@
 - Own display creation, configuration, lifecycle, and inspection. Sunshine and other consumers own capture, encoding, transport, and input.
 - Expose displays through native macOS enumeration and capture interfaces. Do not manage Sunshine processes, configuration, or session hooks; add no Sunshine-specific commands or capture buffer allocation/transfer.
 - Follow private API approaches demonstrated by established open-source projects. Isolate private APIs and record sources, revisions, and limitations.
-- The project is in the research and design phase. See `docs/design.md`; proposed commands are not implemented features.
+- P0 implementation is in progress. See README.md for implemented commands and `docs/design.md` for the roadmap.
 
 ## Working practices
 
@@ -14,7 +14,7 @@
 - Read relevant code and documentation before editing. Keep implementations simple; do not add unrequested fallback logic, silent degradation, or unrelated features.
 - Request installation of missing dependencies instead of installing them without authorization or substituting a degraded implementation.
 - Before using Python, check the project venv first, then Conda environments. Always ask for authorization before using system Python.
-- For research code, do not write tests or run local smoke tests unless explicitly requested. This project is a system utility: keep validation proportional to changes, and do not run runtime validation for documentation changes.
+- This is a system utility, not a research project. Add meaningful automated tests for behavior and failure cases, and run relevant tests for implementation changes. Keep validation proportional; documentation-only changes do not require runtime validation.
 - Provide granular progress for long operations when practical. Report actual stages when the total is unknown; do not invent percentages.
 - Make small, focused Git commits. Exclude unrelated user changes; do not push or rewrite history without authorization.
 - Do not use subagents unless explicitly requested by the user.

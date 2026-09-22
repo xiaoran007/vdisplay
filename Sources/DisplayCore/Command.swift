@@ -1,0 +1,115 @@
+import Foundation
+
+public struct CLIError: Error, CustomStringConvertible {
+    public let description: String
+    public let exitCode: Int32
+    public init(_ description: String, exitCode: Int32 = 2) {
+        self.description = description
+        self.exitCode = exitCode
+    }
+}
+
+public struct DisplayConfiguration: Equatable {
+    public let name: String
+    public let width: UInt32
+    public let height: UInt32
+    public let scale: UInt32
+    public let refresh: Double
+
+    public init(name: String, width: UInt32, height: UInt32, scale: UInt32, refresh: Double) throws {
+        guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !name.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
+            throw CLIError("Display name must be nonempty and contain no control characters.")
+        }
+        guard width > 0, height > 0 else { throw CLIError("Pixel dimensions must be positive.") }
+        guard scale == 1 || scale == 2 else { throw CLIError("Scale must be 1 or 2.") }
+        guard width % scale == 0, height % scale == 0 else {
+            throw CLIError("Pixel dimensions must be divisible by scale.")
+        }
+        guard refresh == 60 else { throw CLIError("This release supports only 60 Hz SDR modes.") }
+        self.name = name
+        self.width = width
+        self.height = height
+        self.scale = scale
+        self.refresh = refresh
+    }
+}
+
+public enum Command: Equatable {
+    case help
+    case list(json: Bool)
+    case doctor
+    case run(DisplayConfiguration)
+
+    public static func parse(_ arguments: [String]) throws -> Command {
+        guard let verb = arguments.first else { return .help }
+        let tail = Array(arguments.dropFirst())
+        switch verb {
+        case "help", "--help", "-h":
+            guard tail.isEmpty else { throw CLIError("Help takes no arguments.") }
+            return .help
+        case "doctor":
+            guard tail.isEmpty else { throw CLIError("Doctor takes no arguments.") }
+            return .doctor
+        case "list":
+            guard tail.isEmpty || tail == ["--json"] else { throw CLIError("Usage: vdisplay list [--json]") }
+            return .list(json: !tail.isEmpty)
+        case "run":
+            let allowed: Set<String> = ["--name", "--width", "--height", "--scale", "--refresh"]
+            var values: [String: String] = [:]
+            var index = 0
+            while index < tail.count {
+                let key = tail[index]
+                guard allowed.contains(key) else { throw CLIError("Unknown option: \(key)") }
+                guard values[key] == nil else { throw CLIError("Duplicate option: \(key)") }
+                guard index + 1 < tail.count, !tail[index + 1].hasPrefix("--") else {
+                    throw CLIError("Missing value for \(key).")
+                }
+                values[key] = tail[index + 1]
+                index += 2
+            }
+            func integer(_ key: String, default value: UInt32? = nil) throws -> UInt32 {
+                guard let raw = values[key] else {
+                    if let value { return value }
+                    throw CLIError("Missing required option: \(key)")
+                }
+                guard !raw.isEmpty, raw.utf8.allSatisfy({ $0 >= 48 && $0 <= 57 }),
+                      let number = UInt32(raw) else { throw CLIError("Invalid unsigned integer for \(key): \(raw)") }
+                return number
+            }
+            let refresh: Double
+            if let raw = values["--refresh"] {
+                guard let parsed = Double(raw), parsed.isFinite else { throw CLIError("Invalid refresh rate: \(raw)") }
+                refresh = parsed
+            } else { refresh = 60 }
+            return .run(try DisplayConfiguration(
+                name: values["--name"] ?? "vdisplay", width: integer("--width"), height: integer("--height"),
+                scale: integer("--scale", default: 1), refresh: refresh))
+        default:
+            throw CLIError("Unknown command: \(verb). Use vdisplay --help.")
+        }
+    }
+}
+
+public struct DisplayMode: Codable, Equatable {
+    public let logicalWidth: Int
+    public let logicalHeight: Int
+    public let pixelWidth: Int
+    public let pixelHeight: Int
+    public let refreshRate: Double
+
+    public init(logicalWidth: Int, logicalHeight: Int, pixelWidth: Int, pixelHeight: Int, refreshRate: Double) {
+        self.logicalWidth = logicalWidth
+        self.logicalHeight = logicalHeight
+        self.pixelWidth = pixelWidth
+        self.pixelHeight = pixelHeight
+        self.refreshRate = refreshRate
+    }
+
+    public func matches(_ configuration: DisplayConfiguration) -> Bool {
+        pixelWidth == Int(configuration.width) && pixelHeight == Int(configuration.height)
+        && logicalWidth == Int(configuration.width / configuration.scale)
+        && logicalHeight == Int(configuration.height / configuration.scale)
+        && refreshRate.isFinite && abs(refreshRate - configuration.refresh) < 0.1
+    }
+}
