@@ -1,6 +1,6 @@
 # vdisplay Research and Implementation Design
 
-Research date: 2026-09-22. Status: P0 implemented and validated on the local Apple Silicon host. See [validation results](validation.md) and the [README](../README.md) for current behavior. Later phases remain proposals.
+Research date: 2026-09-22. Status: P0 validated locally; CI, persistent profiles, and per-profile LaunchAgents implemented. The user will perform further hardware validation manually. See [validation results](validation.md) and the [README](../README.md) for current behavior. In-place mode changes and release distribution remain proposals.
 
 ## 1. Recommended approach
 
@@ -39,7 +39,7 @@ Keep private declarations in the bridge. Verify selectors and types on target sy
 
 DeskPad retains its virtual display as an instance property. A creation command cannot immediately exit and expect its display to persist. Saved configuration contains information for recreation, not an object that remains valid across processes. [DeskPad creation code](https://github.com/Stengo/DeskPad/blob/c3349f0e237e000cb4826fb3ea1cdd1c44949461/DeskPad/Frontend/Screen/ScreenViewController.swift)
 
-Provide foreground `run` first, followed by `agent run` in the same executable. Background operation uses a LaunchAgent in the current user's graphical session. Apple distinguishes per-user agents from system daemons. [Apple launchd documentation](https://developer.apple.com/library/archive/documentation/MacOSX/Conceptual/BPSystemStartup/Chapters/CreatingLaunchdJobs.html)
+Foreground `run` and an internal `agent run PROFILE` worker share the same lifecycle implementation. Each enabled profile has its own LaunchAgent in the current user's graphical session. Apple distinguishes per-user agents from system daemons. [Apple launchd documentation](https://developer.apple.com/library/archive/documentation/MacOSX/Conceptual/BPSystemStartup/Chapters/CreatingLaunchdJobs.html)
 
 Initially support an existing graphical login session, including later SSH requests to its agent. Validate operation without physical monitors, screen locking, and sleep recovery separately. Pre-FileVault-unlock operation, operation without a logged-in user, and continued operation with a closed laptop lid are not initial commitments. Do not automatically change login, sleep, or SIP settings.
 
@@ -88,22 +88,24 @@ Suggested modules:
 | Module | Responsibility |
 | --- | --- |
 | `VirtualDisplayBridge` | Private Objective-C declarations, display creation and mode application, object ownership and release, stable Swift-facing interface |
-| `DisplayCore` | Profiles, validation, display enumeration, actual mode inspection, lifecycle state, and errors |
-| `vdisplay` | Argument parsing, output, foreground execution; later agent mode and IPC client |
+| `DisplayCore` | Argument parsing, configuration validation, persistent profiles, file leases, LaunchAgent definitions/control, lifecycle state, and errors |
+| `vdisplay` | Output, native display inspection, foreground execution, and background profile workers |
 
 Use Swift Package Manager with separate Swift and Objective-C targets. The P0 implementation links Foundation/CoreGraphics, uses AppKit for display names, and SystemConfiguration for console-user inspection. It uses a small strict Swift argument parser so parsing can be tested without touching display APIs. Do not introduce Python, Node, Rust, or a third-party virtual display runtime. If a larger CLI warrants Apple ArgumentParser later, request dependency installation first.
 
-For the second phase, use a per-user Unix domain socket: private runtime directory mode 0700, socket mode 0600, and peer UID validation. Accept only versioned, size-limited JSON commands, never arbitrary shell execution. Use one agent per GUI session and serialize display changes. Place the socket under a short path in the system-provided user temporary directory to respect socket path limits. Store configuration in `~/Library/Application Support/vdisplay/`.
+The implemented background design replaces the proposed single agent and Unix socket with one LaunchAgent owner per profile. This isolates the CoreGraphics mode cache across creation cycles and uses launchd's lifecycle controls instead of a custom server. `agent install` copies the executable to a stable application-support path. `start` writes a profile-specific plist and bootstraps or explicitly kickstarts the job; `stop` boots it out and removes the login definition. Commands pass argument arrays without a shell. No Sunshine process is managed.
+
+Store versioned configuration in `~/Library/Application Support/vdisplay/` with atomic writes, 0700 private directories, and 0600 data files. A control file lease serializes CLI mutations; each owner holds a separate profile lease until cleanup ends. Runtime state is separate from configuration. Status combines state with lease liveness so an exited process's saved display ID is not treated as active. Persistent UUID/serial identities are allocated when profiles are added. Configuration decoding rejects invalid modes and duplicate identities rather than repairing them.
 
 Lifecycle states are `creating -> ready -> removing -> stopped`; failures report observed state. Confirm completion through bounded state readback rather than fixed sleeps. P0 registers display notifications after creation: registering before creation caused missing mode readback on the validation host. Readback covers missed add events. Release objects allocated by a failed creation attempt as operation cleanup. Report removal timeouts rather than claiming the display disappeared.
 
-LaunchAgent installation, startup, shutdown, and removal require explicit commands. Queries must not silently install services. Separate persistent configuration from runtime state and persist only profiles explicitly saved/enabled by the user. After abnormal termination, report state and require an explicit start instead of silently restarting or recreating displays.
+LaunchAgent installation, startup, shutdown, and removal require explicit commands. Queries must not silently install services. An enabled profile's plist uses `RunAtLoad` to restore its display at the next graphical login and `KeepAlive = false` to avoid crash restart loops. A failed start remains enabled until explicitly stopped. Stop preserves the profile; uninstall preserves configuration/logs and refuses while profiles are enabled or running.
 
 Initial exclusions: GUI, previews, encoding, network remote control, physical display disabling, mirroring, brightness/DDC, automatic primary-display changes, and Sunshine configuration management.
 
 ## 5. Proposed CLI
 
-The first-phase commands below are implemented. Second-phase commands remain proposals.
+The foreground and background commands below are implemented. Runtime mode editing remains deferred.
 
 First phase:
 
@@ -125,16 +127,14 @@ Second phase:
 ```sh
 vdisplay profile add remote --name "Sunshine Display" --width 2560 --height 1440 --scale 1 --refresh 60
 vdisplay agent install
-vdisplay agent start
 vdisplay start remote --wait
 vdisplay status remote --json
-vdisplay set remote --width 3840 --height 2160 --scale 2 --refresh 60 --wait
 vdisplay stop remote --wait
-vdisplay agent stop
+vdisplay profile remove remote
 vdisplay agent uninstall
 ```
 
-Profile aliases must be unique. Starting an already active profile with identical configuration returns current state without duplicating it. `set` does not implicitly destroy and recreate a display; report an error if the request cannot be applied in place. Confirm every successful mutation through readback.
+Profile aliases must be unique. Starting an already active profile returns current state without duplicating it. Start/stop wait for owner readiness/shutdown, with explicit `--wait` also accepted. The proposed `set` command is not implemented. Replace configuration by stopping and removing/re-adding the profile; this assigns a new identity. In-place mode changes require a separate implementation decision.
 
 Commands operate on displays, do not read Sunshine-specific environment variables, and do not automatically tie display lifetimes to streaming sessions. Users can call the generic CLI from external automation.
 
@@ -154,11 +154,11 @@ Retain the existing GPLv3 LICENSE. Include applicable attribution and licenses w
 | --- | --- | --- |
 | P0: Minimal foreground tool | Package.swift, bridge, run/list/doctor, explicit errors | Create SDR 1080p60 locally, confirm native enumeration and mode readback, remove on exit |
 | P1: Modes and architectures | Custom dimensions, scales 1/2, persistent profile identity design, builds for both architectures | Validate 1080p/1440p/4K modes and lifecycles on Intel and Apple Silicon; explicitly mark unavailable hardware coverage as pending |
-| P2: Background lifecycle | User agent, IPC, profiles, start/stop/set/status | Display outlives the CLI client and disappears on stop; configuration agrees with runtime state; missing sessions produce clear errors |
+| P2: Background lifecycle | Per-profile LaunchAgents, persistent profiles, start/stop/status; set deferred | Controller/storage tests pass; manual validation must confirm terminal independence, stop cleanup, and login restoration |
 | P3: Consumer compatibility | Native discovery/capture records for pinned Sunshine/Moonlight versions | Consumer enumerates and selects the display; image, dimensions, and mouse mapping are correct without vdisplay managing consumer processes/configuration |
 | P4: Release | Universal 2, signing/notarization, install/uninstall instructions, compatibility table | Clean user environment can install and run; package includes notices; documentation lists only validated capabilities |
 
-P0 is complete on the local validation host. Next, expand P1 hardware and mode coverage before building the background service. The initial implementation already accepts scale 1/2 and custom dimensions, but that does not establish the full P1 compatibility matrix.
+P0 is complete on the local validation host. At the user's request, CI and background persistence were implemented before further P1 hardware coverage. P1 and actual LaunchAgent/display behavior are reserved for manual validation. Accepting scale 1/2 and custom dimensions does not establish the full compatibility matrix.
 
 The following is the overall validation plan; [the validation record](validation.md) distinguishes completed checks from pending coverage:
 

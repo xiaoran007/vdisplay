@@ -6,7 +6,7 @@
 - Own display creation, configuration, lifecycle, and inspection. Sunshine and other consumers own capture, encoding, transport, and input.
 - Expose displays through native macOS enumeration and capture interfaces. Do not manage Sunshine processes, configuration, or session hooks; add no Sunshine-specific commands or capture buffer allocation/transfer.
 - Follow private API approaches demonstrated by established open-source projects. Isolate private APIs and record sources, revisions, and limitations.
-- P0 is implemented. See README.md for implemented commands, `docs/validation.md` for evidence, and `docs/design.md` for the roadmap.
+- Foreground operation, persistent profiles, per-profile LaunchAgents, and CI are implemented. See README.md for commands, `docs/validation.md` for evidence, and `docs/design.md` for the roadmap.
 
 ## Working practices
 
@@ -15,6 +15,7 @@
 - Request installation of missing dependencies instead of installing them without authorization or substituting a degraded implementation.
 - Before using Python, check the project venv first, then Conda environments. Always ask for authorization before using system Python.
 - This is a system utility, not a research project. Add meaningful automated tests for behavior and failure cases, and run relevant tests for implementation changes. Keep validation proportional; documentation-only changes do not require runtime validation.
+- The user will perform display hardware validation manually. Do not create displays or install/start LaunchAgents during development validation unless requested. CI must use temporary storage and simulated service control, without graphical-session requirements.
 - Provide granular progress for long operations when practical. Report actual stages when the total is unknown; do not invent percentages.
 - Make small, focused Git commits. Exclude unrelated user changes; do not push or rewrite history without authorization.
 - Do not use subagents unless explicitly requested by the user.

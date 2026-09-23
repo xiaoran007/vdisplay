@@ -47,3 +47,17 @@ An initial test-script attempt to validate JSON arrays with `plutil` failed. The
 - Release builds, Universal 2 packaging, signing, and notarization.
 
 Unit tests and read-only checks run independently of display creation. Hardware integration remains an explicit script invocation and must not be treated as a headless CI test.
+
+## CI and background persistence update
+
+Date: 2026-09-22. Further display hardware checks are deferred to the user.
+
+Implemented GitHub Actions jobs for `macos-15` and `macos-15-intel`, covering unit tests, CLI checks without display enumeration, and release builds. No hosted run has been observed: commits have not been pushed.
+
+Local automated validation passed:
+
+- 21 XCTest cases, including persistent profile identity, invalid/corrupt configuration, exclusive file leases, stale state, LaunchAgent plist contents, simulated start/stop, idempotent start, readiness timeout, bootstrap/bootout failure, and retained configuration after uninstall.
+- `scripts/test-cli.sh .build/debug/vdisplay --no-display`.
+- `swift build -c release` on arm64.
+
+Service control tests inject launchctl responses and use temporary directories. This update did not invoke actual service installation, bootstrap, bootout, or display creation. The per-profile LaunchAgent design, installed executable startup, terminal independence, and login restoration remain for manual verification. In-place mode editing is not implemented.
