@@ -1,121 +1,107 @@
 # vdisplay
 
-A macOS virtual display CLI for Intel and Apple Silicon. It creates system display outputs that Sunshine and other applications can discover and capture natively.
+Create a virtual screen on your Mac from the terminal. Use it with Sunshine or another remote desktop application that discovers macOS displays natively.
 
-Foreground commands (`run`, `list`, `doctor`), persistent profiles, and per-profile user LaunchAgents are implemented. The CLI uses a small Objective-C bridge to the private `CGVirtualDisplay` API, with no external runtime dependencies. Background display behavior is awaiting manual hardware validation.
+Targets Intel and Apple Silicon Macs running macOS 13 or later. Currently supports SDR at 60 Hz, including HiDPI. Compatibility depends on private macOS APIs; see the [tested configurations and limitations](docs/validation.md).
 
-## Build
+## Build and install
 
-Requires macOS and an Xcode toolchain with Swift 5.9 or later. The package targets macOS 13+, but runtime validation currently covers only Apple Silicon on macOS 27.0. See [validation results](docs/validation.md).
+During early development, installation is from source only. Signed binaries, notarized installers, and Homebrew packages are not provided.
 
-```sh
-swift build
-.build/debug/vdisplay --help
-```
-
-To compile the Intel target separately:
+You need Git and an Xcode toolchain with Swift 5.9 or later installed on your Mac.
 
 ```sh
-swift build --arch x86_64 --scratch-path .build-intel
-```
-
-Cross-compilation does not establish Intel hardware compatibility.
-
-## Use
-
-Run as the current graphical console user, without sudo:
-
-```sh
-.build/debug/vdisplay doctor
-.build/debug/vdisplay list --json
-.build/debug/vdisplay run --name "Remote Display" --width 1920 --height 1080
-```
-
-`run` prints JSON after confirming the actual mode and stays in the foreground. Stop it with Ctrl-C or SIGTERM to remove its display. Adding or removing a display can cause macOS to rearrange windows.
-
-For 4K pixels with a 1920x1080 logical desktop:
-
-```sh
-.build/debug/vdisplay run --name "Retina Remote" --width 3840 --height 2160 --scale 2 --refresh 60
-```
-
-Width and height mean output pixels. Scale is 1 or 2; dimensions must be divisible by scale. Only SDR at 60 Hz is supported in this release. The system may reject particular dimensions; the command reports an error rather than substituting another mode. Creation and removal each have a five-second confirmation deadline.
-
-Diagnostics go to stderr; results go to stdout. Exit codes: 0 success, 2 invalid arguments, 3 missing private API, 4 unavailable graphical user session, 5 display operation or other runtime failure. With no arguments, the CLI prints help.
-
-`list` reports system displays, modes, and names where available. Ownership is `unknown` because this phase has no shared registry. The foreground owner's readiness output marks its display as `this-process`. Display IDs and foreground serial identities are ephemeral, not persistent profile identifiers.
-
-WindowServer manages display content. vdisplay does not implement capture buffers, encoding, or streaming, and does not manage Sunshine processes, configuration, or sessions. Choose the desired display in the consuming application. Native discovery does not automatically select it.
-
-## Persistent background displays
-
-Build the release binary, save a profile, and explicitly install the background executable:
-
-```sh
+git clone https://github.com/xiaoran007/vdisplay.git
+cd vdisplay
 swift build -c release
-.build/release/vdisplay profile add remote --name "Remote Display" --width 3840 --height 2160 --scale 2
-.build/release/vdisplay agent install
-.build/release/vdisplay start remote
-.build/release/vdisplay status remote --json
-.build/release/vdisplay profile list
+mkdir -p "$HOME/.local/bin"
+install -m 755 .build/release/vdisplay "$HOME/.local/bin/vdisplay"
+export PATH="$HOME/.local/bin:$PATH"
 ```
 
-`start` enables the profile and launches its own user LaunchAgent. The display outlives the terminal and is recreated at subsequent graphical logins. It does not run before login or FileVault unlock. `start` waits for mode readiness; repeating it for an already ready profile returns its current state. `--wait` is accepted explicitly but is also the default.
+Add the `export PATH` line to your shell configuration (usually `~/.zshrc`) to make it available in future terminals. The build targets your Mac's architecture.
 
-`agent install` copies the current executable to a stable application-support path, so rebuilding or deleting the checkout does not remove the installed executable. Installation alone does not create a display or enable a login job. Stop all profiles before reinstalling an updated executable.
+## Create a screen
 
-To remove the active display and disable login restoration:
+Run from your logged-in Mac desktop session, without `sudo`:
 
 ```sh
-.build/release/vdisplay stop remote
+vdisplay run 1080p
 ```
 
-The saved profile remains available for a later `start`. To remove its configuration and uninstall the executable:
+The command prints the actual display mode as JSON when ready. Keep it running; **Ctrl-C removes the screen**. Adding or removing screens can rearrange windows.
+
+Select the new display in Sunshine or your remote desktop application. vdisplay creates the display; capture, permissions, streaming, and input are handled by that application.
+
+## Choose a preset
 
 ```sh
-.build/release/vdisplay profile remove remote
-.build/release/vdisplay agent uninstall
+vdisplay presets
+vdisplay run 4k-hidpi
 ```
 
-Uninstallation requires all profiles to be stopped/disabled and preserves profile data and logs. Profiles have stable UUIDs and serial numbers; runtime display IDs can still change. Profile aliases are unique ASCII identifiers. Editing modes in place (`set`) and global agent start/stop commands are not implemented; stop and remove/re-add a profile to replace its configuration, which assigns a new identity.
+| Preset | Output pixels | Logical desktop | Refresh |
+| --- | --- | --- | --- |
+| `1080p` | 1920×1080 | 1920×1080 | 60 Hz |
+| `1440p` | 2560×1440 | 2560×1440 | 60 Hz |
+| `4k` | 3840×2160 | 3840×2160 | 60 Hz |
+| `4k-hidpi` | 3840×2160 | 1920×1080 | 60 Hz |
+| `ultrawide` | 3440×1440 | 3440×1440 | 60 Hz |
+| `portrait` | 1080×1920 | 1080×1920 | 60 Hz |
 
-Each profile has a separate owner process to avoid sharing CoreGraphics mode caches across display creation cycles. launchd manages processes; file locks serialize mutations and prevent duplicate owners. There is no socket server. Jobs do not automatically restart after crashes. Inspect `status`, then explicitly use `start` to retry. A failed start leaves the profile enabled for login restoration; use `stop` to disable it.
+Presets are convenient settings, not a guarantee that every Mac or macOS release supports the mode.
 
-Files are stored under:
+## Keep a screen in the background
 
-- `~/Library/Application Support/vdisplay/profiles.json`: versioned profile configuration.
-- `~/Library/Application Support/vdisplay/bin/vdisplay`: installed executable.
-- `~/Library/Application Support/vdisplay/runtime/`: worker state and ownership locks.
-- `~/Library/Application Support/vdisplay/logs/<UUID>.log`: worker output and diagnostics.
-- `~/Library/LaunchAgents/io.vdisplay.profile.<uuid>.plist`: enabled profile jobs.
-
-`status` combines saved state with an active ownership lock and does not report stale display IDs as live after an owner exits. `list` remains a generic system display query; use `status` for profile ownership.
-
-## Tests
-
-Unit tests require the Xcode test tools. Process and hardware scripts also require `jq` on PATH; no dependency is installed automatically.
+Save a profile, install the background executable, and start it:
 
 ```sh
-swift test
-scripts/test-cli.sh
+vdisplay profile add remote 4k-hidpi
+vdisplay agent install
+vdisplay start remote
+vdisplay status remote
 ```
 
-These checks do not create a display. The opt-in hardware test below temporarily creates one extended screen, checks enumeration and mode dimensions, sends SIGTERM, and verifies removal and restoration of the initial display ID list:
+The display survives closing the terminal and is recreated when you next log in to the graphical desktop. It cannot run before login or FileVault unlock. Background behavior is awaiting manual hardware validation.
 
 ```sh
-scripts/test-display-lifecycle.sh
-scripts/test-display-lifecycle.sh .build/debug/vdisplay 3840 2160 2
+vdisplay stop remote           # Remove the screen and disable login restoration
+vdisplay start remote          # Enable it again
+vdisplay profile list          # Show saved profiles
 ```
 
-Run hardware tests sequentially in a graphical session without other concurrent display changes. Tests can move existing windows through normal macOS layout behavior. The script only signals the owner process it starts.
+## Customize a screen
 
-GitHub Actions runs unit tests, CLI checks with `--no-display`, and release builds on `macos-15` (arm64) and `macos-15-intel`. It does not create displays, install agents, or invoke the hardware lifecycle script. Profile/controller tests use temporary directories and simulated launchctl responses. The workflow will run after these commits are pushed; local checks do not constitute a hosted CI result.
+Override a preset or specify dimensions directly:
 
-## Project documentation
+```sh
+vdisplay run 4k-hidpi --name "Remote Display"
+vdisplay run --size 2560x1440 --scale 1
+```
 
-- [Collaboration guidelines](AGENTS.md)
-- [Design and roadmap](docs/design.md)
-- [Validation record and limitations](docs/validation.md)
-- [Third-party notices](THIRD_PARTY_NOTICES.md)
+For reusable settings, create a JSON file such as [examples/display.json](examples/display.json):
 
-Private APIs may change between macOS releases. The repository retains its [GPLv3 LICENSE](LICENSE).
+```json
+{
+  "name": "Remote Display",
+  "width": 3840,
+  "height": 2160,
+  "scale": 2,
+  "refresh": 60
+}
+```
+
+```sh
+vdisplay run --config display.json
+vdisplay profile add remote --config display.json
+```
+
+Width and height are output pixels. Scale `2` halves the logical desktop dimensions. Explicit flags override file values. A saved profile stores a snapshot, so later file changes do not change it.
+
+See the [command guide](docs/usage.md) for all flags, configuration rules, updating, uninstalling, and troubleshooting.
+
+## Development
+
+See the [development guide](docs/development.md), [design](docs/design.md), and [validation record](docs/validation.md). Contributions follow [AGENTS.md](AGENTS.md).
+
+Licensed under [GPLv3](LICENSE). See [third-party notices](THIRD_PARTY_NOTICES.md) for private API references and attribution.

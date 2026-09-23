@@ -1,6 +1,6 @@
 # vdisplay Research and Implementation Design
 
-Research date: 2026-09-22. Status: P0 validated locally; CI, persistent profiles, and per-profile LaunchAgents implemented. The user will perform further hardware validation manually. See [validation results](validation.md) and the [README](../README.md) for current behavior. In-place mode changes and release distribution remain proposals.
+Research date: 2026-09-22. Status: P0 validated locally; CI, persistent profiles, and per-profile LaunchAgents implemented. The user will perform further hardware validation manually. See [validation results](validation.md) and the [README](../README.md) for current behavior. Built-in presets, JSON configuration input, and size shortcuts are implemented. In-place mode changes remain a proposal. Distribution currently supports local builds only; signing, notarization, and binary packaging are deferred.
 
 ## 1. Recommended approach
 
@@ -10,7 +10,7 @@ The product boundary is the system virtual display. Sunshine and other consumers
 
 Existing open-source implementations establish the feasibility of the basic approach. The main engineering concerns are lifecycle management, OS differences, HiDPI mode semantics, and capture compatibility. A virtual display is not a permanently installed device: the process retaining its object must stay alive.
 
-The initial target is macOS 13+, x86_64 and arm64, with native builds combined into a Universal 2 package. These are targets, not verified support claims. Supported OS releases must be determined by Intel and Apple Silicon hardware validation.
+The initial target is macOS 13+, x86_64 and arm64, built locally for the host architecture. Universal 2 packaging is deferred. These are targets, not verified support claims. Supported OS releases must be determined by Intel and Apple Silicon hardware validation.
 
 ## 2. Implementations reviewed and reuse decisions
 

@@ -1,0 +1,7 @@
+{
+  "name": "Remote Display",
+  "width": 3840,
+  "height": 2160,
+  "scale": 2,
+  "refresh": 60
+}

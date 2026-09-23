@@ -6,7 +6,7 @@
 - Own display creation, configuration, lifecycle, and inspection. Sunshine and other consumers own capture, encoding, transport, and input.
 - Expose displays through native macOS enumeration and capture interfaces. Do not manage Sunshine processes, configuration, or session hooks; add no Sunshine-specific commands or capture buffer allocation/transfer.
 - Follow private API approaches demonstrated by established open-source projects. Isolate private APIs and record sources, revisions, and limitations.
-- Foreground operation, persistent profiles, per-profile LaunchAgents, and CI are implemented. See README.md for commands, `docs/validation.md` for evidence, and `docs/design.md` for the roadmap.
+- Foreground operation, built-in presets, JSON configuration input, persistent profiles, per-profile LaunchAgents, and CI are implemented. Installation is from local source builds; signing and binary distribution are deferred. See README.md for commands, `docs/validation.md` for evidence, and `docs/design.md` for the roadmap.
 
 ## Working practices
 

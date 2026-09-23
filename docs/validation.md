@@ -61,3 +61,13 @@ Local automated validation passed:
 - `swift build -c release` on arm64.
 
 Service control tests inject launchctl responses and use temporary directories. This update did not invoke actual service installation, bootstrap, bootout, or display creation. The per-profile LaunchAgent design, installed executable startup, terminal independence, and login restoration remain for manual verification. In-place mode editing is not implemented.
+
+## Presets and configuration input
+
+Date: 2026-09-23. Local arm64 validation on the same development host passed:
+
+- 25 XCTest cases, including preset expansion, CLI overrides, JSON defaults, profile expansion, invalid sizes, conflicting inputs, malformed files, and unknown configuration keys.
+- `scripts/test-cli.sh .build/debug/vdisplay --no-display`, including preset listing and missing-file errors.
+- `swift build -c release`.
+
+No display was created and no LaunchAgent was installed or started. Presets describe requested modes; this update adds no hardware compatibility evidence. Installation instructions now cover local source builds only; signing and distribution packages are deferred.
