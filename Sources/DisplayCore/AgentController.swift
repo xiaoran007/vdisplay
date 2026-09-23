@@ -81,7 +81,11 @@ public final class AgentController {
     public func status(_ alias: String) throws -> ProfileStatus {
         let profile = try store.profile(alias)
         let running = try store.workerRunning(profile)
-        let saved = try store.state(profile)
+        var saved = try store.state(profile)
+        if running, let current = saved {
+            let token = try store.workerToken(profile)
+            if current.ownerToken == nil || current.ownerToken != token { saved = nil }
+        }
         let state: WorkerState
         if running {
             if let saved, saved.phase == .ready {

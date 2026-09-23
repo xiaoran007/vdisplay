@@ -181,11 +181,11 @@ func runWorker(_ alias: String, store: ProfileStore) throws {
     let profile = try store.profile(alias)
     let lease = try store.workerLease(profile)
     defer { withExtendedLifetime(lease) {} }
-    try store.saveState(WorkerState(profileID: profile.id, phase: .starting), for: profile)
+    try store.saveState(WorkerState(profileID: profile.id, phase: .starting, ownerToken: lease.token), for: profile)
     do {
         try runDisplay(profile.configuration, serial: profile.serial) { info in
             try store.saveState(WorkerState(profileID: profile.id, phase: .ready,
-                                           displayID: info.displayID, mode: info.mode), for: profile)
+                                           displayID: info.displayID, mode: info.mode, ownerToken: lease.token), for: profile)
         }
         try store.saveState(WorkerState(profileID: profile.id, phase: .stopped), for: profile)
     } catch {

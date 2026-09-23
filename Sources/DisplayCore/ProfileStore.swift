@@ -16,17 +16,24 @@ public struct Profile: Codable, Equatable {
 
 public final class FileLease {
     private let fd: Int32
+    public let token = UUID()
     public init(url: URL, nonblocking: Bool = true) throws {
-        fd = open(url.path, O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, S_IRUSR | S_IWUSR)
-        guard fd >= 0 else { throw CLIError("Cannot open lock: \(url.path)", exitCode: 5) }
-        guard flock(fd, LOCK_EX | (nonblocking ? LOCK_NB : 0)) == 0 else {
+        let descriptor = open(url.path, O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, S_IRUSR | S_IWUSR)
+        guard descriptor >= 0 else { throw CLIError("Cannot open lock: \(url.path)", exitCode: 5) }
+        guard flock(descriptor, LOCK_EX | (nonblocking ? LOCK_NB : 0)) == 0 else {
             let reason = errno
-            close(fd)
+            close(descriptor)
             if reason == EWOULDBLOCK {
                 throw CLIError("Another operation owns lock: \(url.lastPathComponent)", exitCode: 4)
             }
             throw CLIError("Could not acquire lock: \(url.lastPathComponent) (errno \(reason))", exitCode: 5)
         }
+        let bytes = Array(token.uuidString.utf8)
+        guard ftruncate(descriptor, 0) == 0, write(descriptor, bytes, bytes.count) == bytes.count else {
+            flock(descriptor, LOCK_UN); close(descriptor)
+            throw CLIError("Could not record lock ownership.", exitCode: 5)
+        }
+        fd = descriptor
     }
     deinit { flock(fd, LOCK_UN); close(fd) }
 }
@@ -39,14 +46,16 @@ public struct WorkerState: Codable, Equatable {
     public let displayID: UInt32?
     public let mode: DisplayMode?
     public let message: String?
+    public let ownerToken: UUID?
 
     public init(profileID: UUID, phase: WorkerPhase, displayID: UInt32? = nil,
-                mode: DisplayMode? = nil, message: String? = nil) {
+                mode: DisplayMode? = nil, message: String? = nil, ownerToken: UUID? = nil) {
         self.profileID = profileID
         self.phase = phase
         self.displayID = displayID
         self.mode = mode
         self.message = message
+        self.ownerToken = ownerToken
     }
 }
 
@@ -71,6 +80,9 @@ public final class ProfileStore {
     }
     public func controlLease() throws -> FileLease { try prepare(); return try FileLease(url: root.appendingPathComponent("control.lock")) }
     public func workerLease(_ profile: Profile) throws -> FileLease { try FileLease(url: lockURL(profile)) }
+    public func workerToken(_ profile: Profile) throws -> UUID? {
+        UUID(uuidString: try String(contentsOf: lockURL(profile), encoding: .utf8))
+    }
     private func lockURL(_ profile: Profile) -> URL { root.appendingPathComponent("runtime/\(profile.id.uuidString).lock") }
     public func stateURL(_ profile: Profile) -> URL { root.appendingPathComponent("runtime/\(profile.id.uuidString).json") }
     public func logURL(_ profile: Profile) -> URL { root.appendingPathComponent("logs/\(profile.id.uuidString).log") }

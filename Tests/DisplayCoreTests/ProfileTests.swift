@@ -103,7 +103,7 @@ final class ProfileTests: XCTestCase {
         let worker = try store.workerLease(profile)
         defer { withExtendedLifetime(worker) {} }
         try store.saveState(WorkerState(profileID: profile.id, phase: .ready, displayID: 77,
-            mode: DisplayMode(logicalWidth: 1280, logicalHeight: 720, pixelWidth: 1280, pixelHeight: 720, refreshRate: 60)), for: profile)
+            mode: DisplayMode(logicalWidth: 1280, logicalHeight: 720, pixelWidth: 1280, pixelHeight: 720, refreshRate: 60), ownerToken: worker.token), for: profile)
         XCTAssertThrowsError(try AgentController(store: store).status("remote"))
     }
     func testPlistUsesStableExecutableArgumentsWithoutShellOrRestartLoop() throws {
@@ -127,7 +127,7 @@ final class ProfileTests: XCTestCase {
                 starts += 1; loaded = true
                 worker = try self.store.workerLease(profile)
                 try self.store.saveState(WorkerState(profileID: profile.id, phase: .ready, displayID: 77,
-                    mode: DisplayMode(logicalWidth: 1920, logicalHeight: 1080, pixelWidth: 1920, pixelHeight: 1080, refreshRate: 60)), for: profile)
+                    mode: DisplayMode(logicalWidth: 1920, logicalHeight: 1080, pixelWidth: 1920, pixelHeight: 1080, refreshRate: 60), ownerToken: worker?.token), for: profile)
                 return CommandResult(status: 0)
             case "bootout": loaded = false; worker = nil; return CommandResult(status: 0)
             default: XCTFail("Unexpected launchctl command"); return CommandResult(status: 1)
@@ -163,6 +163,17 @@ final class ProfileTests: XCTestCase {
         let agent = AgentController(store: store, timeout: 0, launch: { args in CommandResult(status: args[0] == "print" ? 1 : 0) })
         try install(agent)
         XCTAssertThrowsError(try agent.start("remote")) { error in XCTAssertEqual((error as? CLIError)?.exitCode, 5) }
+    }
+    func testNewWorkerDoesNotReusePreviousOwnersReadyState() throws {
+        let profile = try add()
+        try store.saveState(WorkerState(profileID: profile.id, phase: .ready, displayID: 77,
+            mode: DisplayMode(logicalWidth: 1920, logicalHeight: 1080, pixelWidth: 1920, pixelHeight: 1080, refreshRate: 60), ownerToken: UUID()), for: profile)
+        let worker = try store.workerLease(profile)
+        defer { withExtendedLifetime(worker) {} }
+        let status = try AgentController(store: store).status("remote")
+        XCTAssertTrue(status.running)
+        XCTAssertEqual(status.state.phase, .starting)
+        XCTAssertNil(status.state.displayID)
     }
     func testStopFailurePreservesEnabledDefinition() throws {
         let profile = try add()
