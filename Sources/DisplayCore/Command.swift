@@ -9,7 +9,7 @@ public struct CLIError: Error, CustomStringConvertible {
     }
 }
 
-public struct DisplayConfiguration: Equatable {
+public struct DisplayConfiguration: Equatable, Codable {
     public let name: String
     public let width: UInt32
     public let height: UInt32
@@ -33,18 +33,71 @@ public struct DisplayConfiguration: Equatable {
         self.scale = scale
         self.refresh = refresh
     }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        try self.init(name: values.decode(String.self, forKey: .name),
+                      width: values.decode(UInt32.self, forKey: .width), height: values.decode(UInt32.self, forKey: .height),
+                      scale: values.decode(UInt32.self, forKey: .scale), refresh: values.decode(Double.self, forKey: .refresh))
+    }
 }
+
+public enum ProfileCommand: Equatable {
+    case add(String, DisplayConfiguration)
+    case list
+    case remove(String)
+}
+
+public enum AgentCommand: String { case install, uninstall, run }
 
 public enum Command: Equatable {
     case help
     case list(json: Bool)
     case doctor
     case run(DisplayConfiguration)
+    case profile(ProfileCommand)
+    case agent(AgentCommand, profile: String?)
+    case start(String)
+    case stop(String)
+    case status(String, json: Bool)
 
     public static func parse(_ arguments: [String]) throws -> Command {
         guard let verb = arguments.first else { return .help }
         let tail = Array(arguments.dropFirst())
         switch verb {
+        case "profile":
+            guard let action = tail.first else { throw CLIError("Usage: vdisplay profile add|list|remove") }
+            if action == "list", tail.count == 1 { return .profile(.list) }
+            guard tail.count >= 2 else { throw CLIError("A profile alias is required.") }
+            let alias = tail[1]
+            try Profile.validateAlias(alias)
+            if action == "remove", tail.count == 2 { return .profile(.remove(alias)) }
+            if action == "add", case .run(let config) = try parse(["run"] + tail.dropFirst(2)) {
+                return .profile(.add(alias, config))
+            }
+            throw CLIError("Invalid profile command.")
+        case "agent":
+            guard let raw = tail.first, let action = AgentCommand(rawValue: raw) else {
+                throw CLIError("Usage: vdisplay agent install|uninstall")
+            }
+            if action == .run, tail.count == 2 {
+                try Profile.validateAlias(tail[1])
+                return .agent(action, profile: tail[1])
+            }
+            guard action != .run, tail.count == 1 else { throw CLIError("Invalid agent command arguments.") }
+            return .agent(action, profile: nil)
+        case "start", "stop":
+            guard tail.count == 1 || (tail.count == 2 && tail[1] == "--wait") else {
+                throw CLIError("Usage: vdisplay \(verb) PROFILE [--wait]")
+            }
+            try Profile.validateAlias(tail[0])
+            return verb == "start" ? .start(tail[0]) : .stop(tail[0])
+        case "status":
+            guard tail.count == 1 || (tail.count == 2 && tail[1] == "--json") else {
+                throw CLIError("Usage: vdisplay status PROFILE [--json]")
+            }
+            try Profile.validateAlias(tail[0])
+            return .status(tail[0], json: tail.count == 2)
         case "help", "--help", "-h":
             guard tail.isEmpty else { throw CLIError("Help takes no arguments.") }
             return .help

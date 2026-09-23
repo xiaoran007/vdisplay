@@ -11,11 +11,19 @@ Usage:
   vdisplay run --width PIXELS --height PIXELS [--name NAME] [--scale 1|2] [--refresh 60]
   vdisplay list [--json]
   vdisplay doctor
+  vdisplay profile add ALIAS --width PIXELS --height PIXELS [--name NAME] [--scale 1|2] [--refresh 60]
+  vdisplay profile list
+  vdisplay profile remove ALIAS
+  vdisplay agent install|uninstall
+  vdisplay start PROFILE [--wait]
+  vdisplay stop PROFILE [--wait]
+  vdisplay status PROFILE [--json]
   vdisplay --help
 
 run keeps one SDR virtual display alive until Ctrl-C or SIGTERM.
 Dimensions are output pixels; scale 2 requests half-sized logical dimensions.
-Run in the current user's graphical login session. No background service is installed.
+Background profiles require explicit agent installation. Start enables login restoration;
+stop disables it. Both commands wait for completion. Run without sudo.
 """
 
 func diagnostic(_ text: String) {
@@ -92,7 +100,8 @@ let displayCallback: CGDisplayReconfigurationCallBack = { _, _, _ in
     CFRunLoopWakeUp(CFRunLoopGetMain())
 }
 
-func runDisplay(_ configuration: DisplayConfiguration) throws {
+func runDisplay(_ configuration: DisplayConfiguration, serial requestedSerial: UInt32? = nil,
+                onReady: ((DisplayInfo) throws -> Void)? = nil) throws {
     try checkSession()
     try checkAPI()
     var interrupted = false
@@ -108,10 +117,10 @@ func runDisplay(_ configuration: DisplayConfiguration) throws {
 
     diagnostic("Creating virtual display...")
     var error = [CChar](repeating: 0, count: 1024)
-    // Foreground runs have ephemeral identity. Persistent profiles are a later phase.
+    // Profiles supply a persistent serial; direct foreground runs use ephemeral identity.
     // Each foreground owner has a distinct PID. Do not enumerate before creation:
     // CoreGraphics can cache a topology that excludes the new display's modes.
-    let serial = UInt32(getpid())
+    let serial = requestedSerial ?? UInt32(getpid())
     guard let handle = VDCreate(configuration.name as CFString, configuration.width, configuration.height,
                                 configuration.scale, configuration.refresh, serial, &error, error.count) else {
         throw CLIError(String(cString: error), exitCode: 5)
@@ -139,6 +148,7 @@ func runDisplay(_ configuration: DisplayConfiguration) throws {
             let ready = DisplayInfo(displayID: id, name: configuration.name, ownership: "this-process",
                                     isMain: CGDisplayIsMain(id) != 0, isActive: CGDisplayIsActive(id) != 0,
                                     mode: currentMode(id))
+            try onReady?(ready)
             print(try encode(ready))
             fflush(stdout)
             diagnostic("Display ready. Press Ctrl-C to remove it.")
@@ -166,8 +176,62 @@ func runDisplay(_ configuration: DisplayConfiguration) throws {
     if let creationError { throw creationError }
 }
 
+func runWorker(_ alias: String, store: ProfileStore) throws {
+    try store.prepare()
+    let profile = try store.profile(alias)
+    let lease = try store.workerLease(profile)
+    defer { withExtendedLifetime(lease) {} }
+    try store.saveState(WorkerState(profileID: profile.id, phase: .starting), for: profile)
+    do {
+        try runDisplay(profile.configuration, serial: profile.serial) { info in
+            try store.saveState(WorkerState(profileID: profile.id, phase: .ready,
+                                           displayID: info.displayID, mode: info.mode), for: profile)
+        }
+        try store.saveState(WorkerState(profileID: profile.id, phase: .stopped), for: profile)
+    } catch {
+        do {
+            try store.saveState(WorkerState(profileID: profile.id, phase: .failed,
+                                           message: String(describing: error)), for: profile)
+        } catch { diagnostic("Could not save worker failure: \(error)") }
+        throw error
+    }
+}
+
 do {
+    let store = ProfileStore.standard()
+    let agent = AgentController(store: store)
     switch try Command.parse(Array(CommandLine.arguments.dropFirst())) {
+    case .profile(let command):
+        switch command {
+        case .add(let alias, let config): print(try encode(store.add(alias: alias, configuration: config)))
+        case .list: print(try encode(store.profiles()))
+        case .remove(let alias): try store.remove(alias); print("Profile removed: \(alias)")
+        }
+    case .agent(let command, let alias):
+        switch command {
+        case .install:
+            try checkSession()
+            guard let executable = Bundle.main.executableURL else { throw CLIError("Cannot locate the running executable.", exitCode: 5) }
+            try agent.install(from: executable.resolvingSymlinksInPath())
+            print("Agent executable installed: \(store.binary.path)")
+        case .uninstall:
+            try checkSession(); try agent.uninstall(); print("Agent executable removed. Profiles and logs retained.")
+        case .run:
+            guard let alias else { throw CLIError("Worker profile alias is required.") }
+            try runWorker(alias, store: store)
+        }
+    case .start(let alias):
+        try checkSession(); diagnostic("Starting background display..."); print(try encode(agent.start(alias)))
+    case .stop(let alias):
+        try checkSession(); diagnostic("Stopping background display..."); try agent.stop(alias); print("Profile stopped and disabled: \(alias)")
+    case .status(let alias, let json):
+        let status = try agent.status(alias)
+        if json { print(try encode(status)) }
+        else {
+            print("\(alias): \(status.state.phase.rawValue), enabled=\(status.enabled), running=\(status.running)")
+            if let id = status.state.displayID { print("Display ID: \(id)") }
+            if let message = status.state.message { print(message) }
+        }
     case .help: print(usage)
     case .list(let json): try listDisplays(json: json)
     case .doctor:
