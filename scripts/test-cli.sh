@@ -2,6 +2,11 @@
 # Process-level CLI checks. This script never creates a display.
 set -euo pipefail
 binary=${1:-.build/debug/vdisplay}
+mode=${2:-}
+if [[ -n "$mode" && "$mode" != --no-display ]]; then
+    echo 'Usage: test-cli.sh [BINARY] [--no-display]' >&2
+    exit 2
+fi
 if [[ ! -x "$binary" ]]; then
     echo "Build vdisplay before running this script." >&2
     exit 1
@@ -21,7 +26,9 @@ for arguments in 'unknown' 'run --width 0 --height 1080' 'run --width 1920 --hei
     [[ ! -s "$work/output" ]]
     [[ -s "$work/error" ]]
 done
-"$binary" list --json > "$work/displays.json" 2> "$work/error"
-jq -e 'type == "array" and all(.[]; (.displayID | type) == "number")' "$work/displays.json" > /dev/null
-[[ ! -s "$work/error" ]]
+if [[ "$mode" != --no-display ]]; then
+    "$binary" list --json > "$work/displays.json" 2> "$work/error"
+    jq -e 'type == "array" and all(.[]; (.displayID | type) == "number")' "$work/displays.json" > /dev/null
+    [[ ! -s "$work/error" ]]
+fi
 echo "CLI process checks passed. No display was created."
