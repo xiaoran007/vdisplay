@@ -53,6 +53,7 @@ public enum AgentCommand: String { case install, uninstall, run }
 public enum Command: Equatable {
     case help
     case list(json: Bool)
+    case presets(json: Bool)
     case doctor
     case run(DisplayConfiguration)
     case profile(ProfileCommand)
@@ -61,7 +62,7 @@ public enum Command: Equatable {
     case stop(String)
     case status(String, json: Bool)
 
-    public static func parse(_ arguments: [String]) throws -> Command {
+    public static func parse(_ arguments: [String], readFile: DisplayOptions.FileReader = DisplayOptions.readFile) throws -> Command {
         guard let verb = arguments.first else { return .help }
         let tail = Array(arguments.dropFirst())
         switch verb {
@@ -72,7 +73,7 @@ public enum Command: Equatable {
             let alias = tail[1]
             try Profile.validateAlias(alias)
             if action == "remove", tail.count == 2 { return .profile(.remove(alias)) }
-            if action == "add", case .run(let config) = try parse(["run"] + tail.dropFirst(2)) {
+            if action == "add", case .run(let config) = try parse(["run"] + tail.dropFirst(2), readFile: readFile) {
                 return .profile(.add(alias, config))
             }
             throw CLIError("Invalid profile command.")
@@ -107,37 +108,11 @@ public enum Command: Equatable {
         case "list":
             guard tail.isEmpty || tail == ["--json"] else { throw CLIError("Usage: vdisplay list [--json]") }
             return .list(json: !tail.isEmpty)
+        case "presets":
+            guard tail.isEmpty || tail == ["--json"] else { throw CLIError("Usage: vdisplay presets [--json]") }
+            return .presets(json: !tail.isEmpty)
         case "run":
-            let allowed: Set<String> = ["--name", "--width", "--height", "--scale", "--refresh"]
-            var values: [String: String] = [:]
-            var index = 0
-            while index < tail.count {
-                let key = tail[index]
-                guard allowed.contains(key) else { throw CLIError("Unknown option: \(key)") }
-                guard values[key] == nil else { throw CLIError("Duplicate option: \(key)") }
-                guard index + 1 < tail.count, !tail[index + 1].hasPrefix("--") else {
-                    throw CLIError("Missing value for \(key).")
-                }
-                values[key] = tail[index + 1]
-                index += 2
-            }
-            func integer(_ key: String, default value: UInt32? = nil) throws -> UInt32 {
-                guard let raw = values[key] else {
-                    if let value { return value }
-                    throw CLIError("Missing required option: \(key)")
-                }
-                guard !raw.isEmpty, raw.utf8.allSatisfy({ $0 >= 48 && $0 <= 57 }),
-                      let number = UInt32(raw) else { throw CLIError("Invalid unsigned integer for \(key): \(raw)") }
-                return number
-            }
-            let refresh: Double
-            if let raw = values["--refresh"] {
-                guard let parsed = Double(raw), parsed.isFinite else { throw CLIError("Invalid refresh rate: \(raw)") }
-                refresh = parsed
-            } else { refresh = 60 }
-            return .run(try DisplayConfiguration(
-                name: values["--name"] ?? "vdisplay", width: integer("--width"), height: integer("--height"),
-                scale: integer("--scale", default: 1), refresh: refresh))
+            return .run(try DisplayOptions.resolve(tail, readFile: readFile))
         default:
             throw CLIError("Unknown command: \(verb). Use vdisplay --help.")
         }

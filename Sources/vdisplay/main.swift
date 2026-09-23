@@ -8,10 +8,11 @@ import VirtualDisplayBridge
 
 let usage = """
 Usage:
-  vdisplay run --width PIXELS --height PIXELS [--name NAME] [--scale 1|2] [--refresh 60]
+  vdisplay run [PRESET] [OPTIONS]
+  vdisplay presets [--json]
   vdisplay list [--json]
   vdisplay doctor
-  vdisplay profile add ALIAS --width PIXELS --height PIXELS [--name NAME] [--scale 1|2] [--refresh 60]
+  vdisplay profile add ALIAS [PRESET] [OPTIONS]
   vdisplay profile list
   vdisplay profile remove ALIAS
   vdisplay agent install|uninstall
@@ -19,6 +20,17 @@ Usage:
   vdisplay stop PROFILE [--wait]
   vdisplay status PROFILE [--json]
   vdisplay --help
+
+Examples:
+  vdisplay run 1080p
+  vdisplay run 4k-hidpi --name "Remote Display"
+  vdisplay run --size 2560x1440
+  vdisplay profile add remote --config display.json
+
+Options: --config FILE, --size WIDTHxHEIGHT (or --width PIXELS --height PIXELS),
+         --name NAME, --scale 1|2, --refresh 60.
+Choose a preset or a JSON config as a base; explicit options override its fields.
+Config fields: width, height (required); name, scale, refresh (optional).
 
 run keeps one SDR virtual display alive until Ctrl-C or SIGTERM.
 Dimensions are output pixels; scale 2 requests half-sized logical dimensions.
@@ -231,6 +243,14 @@ do {
             print("\(alias): \(status.state.phase.rawValue), enabled=\(status.enabled), running=\(status.running)")
             if let id = status.state.displayID { print("Display ID: \(id)") }
             if let message = status.state.message { print(message) }
+        }
+    case .presets(let json):
+        if json { print(try encode(DisplayPreset.all)) }
+        else {
+            print("PRESET  PIXELS  LOGICAL  HZ")
+            for preset in DisplayPreset.all {
+                print("\(preset.id)  \(preset.width)x\(preset.height)  \(preset.width / preset.scale)x\(preset.height / preset.scale)  \(Int(preset.refresh))")
+            }
         }
     case .help: print(usage)
     case .list(let json): try listDisplays(json: json)

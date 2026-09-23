@@ -16,7 +16,9 @@ trap 'rm -rf "$work"' EXIT
 "$binary" --help > "$work/help" 2> "$work/error"
 grep -q 'Usage:' "$work/help"
 [[ ! -s "$work/error" ]]
-for arguments in 'unknown' 'run --width 0 --height 1080' 'run --width 1920 --height 1080 --refresh 120'; do
+"$binary" presets > "$work/presets"
+grep -q '4k-hidpi' "$work/presets"
+for arguments in 'run missing-preset' 'run --config /nonexistent/vdisplay-test.json' 'unknown' 'run --width 0 --height 1080' 'run --width 1920 --height 1080 --refresh 120'; do
     set +e
     # Intentionally split these fixed test arguments; no user input is evaluated.
     "$binary" $arguments > "$work/output" 2> "$work/error"
